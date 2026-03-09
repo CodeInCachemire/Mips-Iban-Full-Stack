@@ -140,7 +140,7 @@ class ConversionRequest(BaseModel):
                 
             
 @app.post("/run")
-@limiter.limit("2/second;40/minute")
+@limiter.limit("15/second;40/minute")
 def run(request: Request, req: ConversionRequest):
     mode = req.mode.upper()
     input_dict = {}
