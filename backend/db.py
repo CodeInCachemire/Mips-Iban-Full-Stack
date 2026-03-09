@@ -5,8 +5,8 @@ from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Use absolute path or override via environment variable
-PATH_DB = os.getenv("DATABASE_PATH", "/app/data/history.db")
+# Use relative path for local testing, absolute path in Docker
+PATH_DB = os.getenv("DATABASE_PATH", "data/history.db")
 
 CREATE_TABLE = "CREATE TABLE IF NOT EXISTS conversion_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, direction TEXT NOT NULL, input TEXT NOT NULL, output TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);"
 INSERT_INTO = "INSERT INTO conversion_logs (direction, input, output) VALUES (?,?,?);"
