@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+
+# Test files & runner
+tests/
+test_backend.py
+test_frontend.py
+run_tests.py
+
+# Database / runtime data
+data/
+*.db
+*.log
+
+# Dev tooling
+.vscode/
+.gitignore
+*.md
+
+# Git
+.git/

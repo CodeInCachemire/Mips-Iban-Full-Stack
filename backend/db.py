@@ -5,7 +5,8 @@ from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
-PATH_DB = "data/history.db"
+# Use absolute path or override via environment variable
+PATH_DB = os.getenv("DATABASE_PATH", "/app/data/history.db")
 
 CREATE_TABLE = "CREATE TABLE IF NOT EXISTS conversion_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, direction TEXT NOT NULL, input TEXT NOT NULL, output TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);"
 INSERT_INTO = "INSERT INTO conversion_logs (direction, input, output) VALUES (?,?,?);"
@@ -14,7 +15,8 @@ READ_LAST_20 = "SELECT * FROM conversion_logs ORDER BY created_at DESC LIMIT 20"
 
 def init_db() -> None:
     try:
-        os.makedirs("data", exist_ok=True)
+        db_dir = os.path.dirname(PATH_DB)
+        os.makedirs(db_dir, exist_ok=True)
         conn = sqlite3.connect(PATH_DB)
         try:
             cursor = conn.cursor()

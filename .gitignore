@@ -10,5 +10,10 @@ __pycache__/
 venv/
 .venv/
 env/
+.env
 # VS Code
 .vscode/
+# Database / runtime data
+data/
+*.db
+*.log

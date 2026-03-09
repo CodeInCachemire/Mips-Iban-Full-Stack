@@ -2,6 +2,12 @@ import json
 import os
 import re
 import subprocess
+from slowapi import Limiter
+from slowapi.util import get_ipaddr
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.errors import RateLimitExceeded
+from fastapi import Request
+from fastapi.responses import JSONResponse
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +22,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+mips_timeout = int(os.getenv("MIPS_TIMEOUT", "10"))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -23,11 +30,41 @@ async def lifespan(app: FastAPI):
     yield
 app = FastAPI(lifespan=lifespan)
 
+#CORS should exist before any and all routes
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:8000,http://127.0.0.1:8000"
+).split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["POST", "GET"],
+    allow_headers=["Content-Type"],
+)
+
+limiter = Limiter(key_func=get_ipaddr)
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(req: Request, exception: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail" : "Rate limit exceeded please try again."},
+    )
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
+@app.get("/")
+def serve_frontend():
+    # Serve the frontend HTML
+    return FileResponse("frontend/index.html")
+
 @app.get("/history")
-def read_history():
+@limiter.limit("30/minute")
+def read_history(request: Request):
     rows = db.read_conversion()
     data = []
     for row in rows:
@@ -51,20 +88,7 @@ def serve_frontend():
     # Correct relative path inside Docker (/app/static/index.html)
     return FileResponse("frontend/index.html")
 
-ALLOWED_ORIGINS = os.getenv(
-    "ALLOWED_ORIGINS",
-    "http://localhost:8000,http://127.0.0.1:8000"
-).split(",")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["POST", "GET"],
-    allow_headers=["Content-Type"],
-)
-
-class Request(BaseModel):
+class ConversionRequest(BaseModel):
     mode: str = Field(
         ...,
         description="Operation mode: 'IBAN' or 'KNRBLZ'",
@@ -116,7 +140,8 @@ class Request(BaseModel):
                 
             
 @app.post("/run")
-def run(req: Request):
+@limiter.limit("2/second;40/minute")
+def run(request: Request, req: ConversionRequest):
     mode = req.mode.upper()
     input_dict = {}
     logger.info(f"Processing {mode} conversion request")
@@ -159,7 +184,6 @@ def run(req: Request):
         "/app/src/main.asm",
     ]
 
-    mips_timeout = int(os.getenv("MIPS_TIMEOUT", "10"))
     try:
         result = subprocess.run(
             cmd,
