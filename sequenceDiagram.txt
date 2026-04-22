@@ -1,0 +1,116 @@
+```mermaid
+sequenceDiagram
+    actor User
+    participant Frontend as Frontend<br/>(HTML/JavaScript)
+    participant Backend as Backend<br/>(FastAPI)
+    participant MARS as MARS<br/>(Java MIPS Simulator)
+    participant Database as SQLite<br/>Database
+    
+    Note over User,Database: IBAN ↔ KNR+BLZ Conversion Flow
+
+    User->>Frontend: Enters Mode (IBAN or KNRBLZ)
+    activate Frontend
+    Frontend->>Frontend: selectMode()
+    deactivate Frontend
+
+    User->>Frontend: Enters Value(s) & Clicks Run
+    activate Frontend
+    Frontend->>Frontend: Validate Input (format check)
+    
+    alt Validation Error
+        Frontend->>Frontend: Display Error Message
+        Frontend->>User: Show Error
+    else Valid Input
+        Frontend->>Frontend: setLoading(true)
+        Frontend->>Backend: POST /run with JSON body
+        deactivate Frontend
+        
+        activate Backend
+        Backend->>Backend: Parse ConversionRequest
+        Backend->>Backend: Validate mode & values<br/>(Pydantic validators)
+        
+        alt Validation Fails
+            Backend->>Frontend: HTTP 400/422 Error
+            activate Frontend
+            Frontend->>Frontend: Display Error Message
+            Frontend->>User: Show Error
+            deactivate Frontend
+        else Validation Passes
+            Backend->>Backend: Prepare MIPS input<br/>(format: MODE\nVAL1\nVAL2)
+            Backend->>Backend: Mask sensitive data<br/>(for logging)
+            
+            Note over Backend: Build MARS command with 7 ASM files
+            Backend->>MARS: Execute: java -jar mars.jar<br/>+ /app/src/*.asm
+            
+            activate MARS
+            MARS->>MARS: Load & assemble ASM files:<br/>- main.asm<br/>- iban2knr.asm<br/>- knr2iban.asm<br/>- validateChecksum.asm<br/>- verify_iban.asm<br/>- moduloStr.asm<br/>- util.asm
+            
+            MARS->>MARS: Read stdin (IBAN or KNRBLZ)
+            
+            alt IBAN Mode
+                MARS->>MARS: verify_iban.asm: Check DE prefix
+                MARS->>MARS: validateChecksum.asm: Validate IBAN checksum
+                MARS->>MARS: iban2knr.asm: Convert IBAN → KNR+BLZ
+                MARS->>MARS: Output: OK<br/>KNR=...<br/>BLZ=...
+            else KNRBLZ Mode
+                MARS->>MARS: knr2iban.asm: Convert KNR+BLZ → IBAN
+                MARS->>MARS: verify_iban.asm: Verify result checksum
+                MARS->>MARS: Output: OK<br/>IBAN=...
+            end
+            
+            MARS-->>Backend: Return stdout/stderr
+            deactivate MARS
+            
+            Backend->>Backend: Parse output lines<br/>Check for "OK" or "ERR"
+            
+            alt MIPS Error
+                Backend->>Frontend: HTTP 500 Error
+                activate Frontend
+                Frontend->>Frontend: Display Error Message
+                Frontend->>User: Show Error Details
+                deactivate Frontend
+            else MIPS Success
+                Backend->>Backend: Extract results from output
+                Backend->>Backend: Create output_dict<br/>(KNR, BLZ, IBAN)
+                Backend->>Database: log_conversion(<br/>direction, input, output)
+                
+                activate Database
+                Database->>Database: INSERT INTO conversion_logs
+                Database-->>Backend: Confirm logged
+                deactivate Database
+                
+                Backend-->>Frontend: HTTP 200 + JSON response<br/>{ result, direction, input, output }
+                deactivate Backend
+                
+                activate Frontend
+                Frontend->>Frontend: Parse JSON response
+                Frontend->>Frontend: Display results in output div
+                Frontend->>Frontend: setLoading(false)
+                Frontend->>User: Show Results
+                deactivate Frontend
+            end
+        end
+    end
+
+    Note over User,Database: History Retrieval Flow
+
+    User->>Frontend: Click "View History"
+    activate Frontend
+    Frontend->>Backend: GET /history
+    deactivate Frontend
+    
+    activate Backend
+    Backend->>Database: read_conversion()<br/>SELECT * ... LIMIT 20
+    activate Database
+    Database-->>Backend: Return 20 most recent logs
+    deactivate Database
+    
+    Backend->>Backend: Format each row:<br/>id, direction, input(JSON),<br/>output(JSON), created_at
+    Backend-->>Frontend: HTTP 200 + Array of entries
+    deactivate Backend
+    
+    activate Frontend
+    Frontend->>Frontend: Populate history table
+    Frontend->>User: Display Conversion History
+    deactivate Frontend
+```

@@ -69,7 +69,16 @@ body {
 }
 
 .card-subtitle {
-  color: var(--text-muted);
+  color: #3a5df8;
+  font-weight: 500;
+  line-height: 1.6;
+  margin-bottom: 1.25rem;
+}
+
+.card-subtitle-1 {
+  color: #000000;
+  font-weight: 500;
+  line-height: 1.6;
   margin-bottom: 1.25rem;
 }
 

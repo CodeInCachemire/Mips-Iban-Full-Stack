@@ -29,11 +29,11 @@ async def lifespan(app: FastAPI):
     db.init_db()
     yield
 app = FastAPI(lifespan=lifespan)
-
+port = os.getenv("PORT", "8000")
 #CORS should exist before any and all routes
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS",
-    "http://localhost:8000,http://127.0.0.1:8000"
+    f"http://localhost:{port},http://127.0.0.1:{port}"
 ).split(",")
 
 app.add_middleware(

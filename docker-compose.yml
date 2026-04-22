@@ -2,16 +2,17 @@ services:
   app:
     build: .
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:${PORT:-8000}"
     environment:
-      - ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000,http://${EC2_PUBLIC_IP}:8000
+      - PORT=${PORT:-8000}
+      - ALLOWED_ORIGINS=http://localhost:${PORT:-8000},http://127.0.0.1:${PORT:-8000},http://${EC2_PUBLIC_IP}:${PORT:-8000}
       - MIPS_TIMEOUT=10
       - DATABASE_PATH=/app/data/history.db
     volumes:
       - db_data:/app/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8000}/"]
       interval: 30s
       timeout: 10s
       retries: 3
