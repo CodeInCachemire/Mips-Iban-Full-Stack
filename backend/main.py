@@ -83,11 +83,6 @@ def mask_number(s:str, mask_char="*"):
 def mask_iban(s:str, mask_char="*"):
     return s[:6] + mask_char * (len(s) - 9) + s[-3:]
 
-@app.get("/")
-def serve_frontend():
-    # Correct relative path inside Docker (/app/static/index.html)
-    return FileResponse("frontend/index.html")
-
 class ConversionRequest(BaseModel):
     mode: str = Field(
         ...,
