@@ -18,23 +18,30 @@ from backend import db
 import logging
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG if os.getenv("DEBUG") else logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 mips_timeout = int(os.getenv("MIPS_TIMEOUT", "10"))
+logger.info("Application starting - logging configured")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("Initializing database...")
     db.init_db()
+    logger.info("Database initialized successfully")
     yield
+    logger.info("Application shutdown")
 app = FastAPI(lifespan=lifespan)
+logger.info("FastAPI app initialized")
 port = os.getenv("PORT", "8000")
+logger.info(f"Server port set to: {port}")
 #CORS should exist before any and all routes
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS",
     f"http://localhost:{port},http://127.0.0.1:{port}"
 ).split(",")
+logger.info(f"CORS allowed origins: {ALLOWED_ORIGINS}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,29 +50,35 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
+logger.info("CORS middleware added")
 
 limiter = Limiter(key_func=get_ipaddr)
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
+logger.info("Rate limiting middleware added")
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_handler(req: Request, exception: RateLimitExceeded):
+    logger.warning(f"Rate limit exceeded for IP: {req.client.host}")
     return JSONResponse(
         status_code=429,
         content={"detail" : "Rate limit exceeded please try again."},
     )
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
+logger.info("Static files mounted at /static")
 
 @app.get("/")
 def serve_frontend():
-    # Serve the frontend HTML
+    logger.info("Serving frontend index.html")
     return FileResponse("frontend/index.html")
 
 @app.get("/history")
 @limiter.limit("30/minute")
 def read_history(request: Request):
+    logger.info("Fetching conversion history")
     rows = db.read_conversion()
+    logger.info(f"Retrieved {len(rows)} history records")
     data = []
     for row in rows:
         entry = {
@@ -140,14 +153,17 @@ def run(request: Request, req: ConversionRequest):
     mode = req.mode.upper()
     input_dict = {}
     logger.info(f"Processing {mode} conversion request")
+    logger.debug(f"Input data - mode: {mode}, value1: {req.value1[:4]}..., value2: {'*'*8 if req.value2 else 'None'}")
 
     if mode == "IBAN":
         input_text = f"IBAN\n{req.value1.upper()}\n"
         masked_input = mask_iban(req.value1.upper())
         input_dict = {"IBAN":masked_input}
+        logger.info("IBAN mode: extracting KNR and BLZ")
 
     elif mode == "KNRBLZ":
         if req.value2 is None:
+            logger.warning("KNRBLZ mode requested but value2 (BLZ) is missing")
             raise HTTPException(
                 status_code=400,
                 detail="value2 (BLZ) required for KNRBLZ mode"
@@ -156,12 +172,16 @@ def run(request: Request, req: ConversionRequest):
         masked_KNR = mask_number(req.value1)
         masked_BLZ = mask_number(req.value2)
         input_dict = {"KNR":masked_KNR, "BLZ" :masked_BLZ}
+        logger.info("KNRBLZ mode: generating IBAN")
 
     else:
+        logger.error(f"Invalid mode received: {mode}")
         raise HTTPException(
             status_code=400,
             detail="Invalid mode. Use 'IBAN' or 'KNRBLZ'."
         )
+
+    logger.info("Executing MIPS assembly program")
 
     cmd = [
         "java", "-jar", "/app/mars.jar",
@@ -190,21 +210,23 @@ def run(request: Request, req: ConversionRequest):
         )
         logger.info(f"MIPS execution completed successfully for {mode}")
     except subprocess.TimeoutExpired:
-        logger.error(f"MIPS execution timed out for {mode} conversion")
+        logger.error(f"MIPS execution timed out for {mode} conversion after {mips_timeout}s")
         raise HTTPException(
             status_code=500,
             detail="MIPS execution timed out"
         )
     except subprocess.CalledProcessError as e:
-        logger.error(f"MIPS execution failed for {mode}: {e.stderr}")
+        logger.error(f"MIPS execution failed for {mode}: {e.stderr}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=e.stderr or "MIPS execution failed"
         )
     
     lines = result.stdout.splitlines()
+    logger.info(f"MIPS output lines received: {len(lines)}")
 
     if not lines:
+        logger.error("No output from MIPS program execution")
         raise HTTPException(
             status_code=500,
             detail="No output from MIPS program execution"
@@ -215,6 +237,7 @@ def run(request: Request, req: ConversionRequest):
         for line in lines:
             if line.startswith("MSG="):
                 message = line.split("=", 1)[1]
+        logger.error(f"MIPS execution returned error: {message}")
         raise HTTPException(status_code=400, detail=message)
 
     result = {}
@@ -229,6 +252,8 @@ def run(request: Request, req: ConversionRequest):
                 result[k] = v
                 output_masked[k] = mask_number(v)
     
+    logger.info(f"Parsed result: {list(result.keys())}")
+    
     if mode == "KNRBLZ":
         status_msg = "Successful KNR and BLZ parsed and valid IBAN generated!"
     
@@ -236,8 +261,9 @@ def run(request: Request, req: ConversionRequest):
         db.log_conversion(mode, json.dumps(input_dict), json.dumps(output_masked))
         logger.info(f"Conversion logged to database: {mode}")
     except Exception as e:
-        logger.error(f"Failed to log conversion to database: {e}")
+        logger.error(f"Failed to log conversion to database: {e}", exc_info=True)
     
     response = {"status_msg" : status_msg, "result" : result}
+    logger.info(f"Returning successful response for {mode} conversion")
     return response
 
