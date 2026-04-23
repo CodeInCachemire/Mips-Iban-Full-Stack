@@ -144,7 +144,6 @@ sequenceDiagram
             ├── test_validateChecksum.asm
             ├── test_validateChecksum.ref
     ├── .dockerignore
-    ├── .env
     ├── .gitignore
     ├── docker-compose.yml
     ├── Dockerfile
